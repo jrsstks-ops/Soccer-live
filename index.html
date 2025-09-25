@@ -23,49 +23,74 @@
 </div>
 
 <div id="out">พิมพ์ชื่อทีมแล้วกด Lookup</div>
-
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script>
-const URL = "https://projects.fivethirtyeight.com/soccer-api/club/spi_matches_latest.csv";
+// แหล่งข้อมูลหลัก (538)
+const SRC = "https://projects.fivethirtyeight.com/soccer-api/club/spi_matches_latest.csv";
 
-function pct(p){ return (p*100).toFixed(1)+"%"; }
+// proxy สำรองเพื่อแก้ CORS (ลองตามลำดับ)
+const PROXIES = [
+  // proxy แบบ passthrough
+  u => "https://cors.isomorphic-git.org/" + u,
+  // proxy แปลงเป็นหน้าอ่านได้ (เหมาะกับไฟล์ text/csv)
+  u => "https://r.jina.ai/http://" + u.replace(/^https?:\/\//,"")
+];
+
+function pct(p){ return (p*100).toFixed(1) + "%"; }
 function fair(p){ return p>0 ? (1/p).toFixed(2) : "-"; }
 
 let cache = [];
 
-async function ensureData(){
-  if (cache.length) return cache;
-  try {
-    const resp = await fetch(URL, {cache:"no-store"});
-    if(!resp.ok) throw new Error("HTTP "+resp.status);
-    const text = await resp.text();
+async function fetchTextWithFallback(url){
+  // 1) ลองโหลดตรง
+  try{
+    const r = await fetch(url, {cache:"no-store"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return await r.text();
+  }catch(e){
+    console.warn("Direct fetch failed:", e.message);
+  }
+  // 2) ลองผ่าน proxy ตามลำดับ
+  for(const wrap of PROXIES){
+    const u = wrap(url);
+    try{
+      const r = await fetch(u, {cache:"no-store"});
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      const t = await r.text();
+      // r.jina.ai อาจเติม header/text; แต่สำหรับ CSV จะส่งเป็นข้อความล้วน ใช้ได้เลย
+      return t;
+    }catch(e){
+      console.warn("Proxy failed:", u, e.message);
+    }
+  }
+  throw new Error("โหลดไฟล์ไม่ได้ทั้งตรงและผ่าน proxy");
+}
 
-    // parse ด้วย PapaParse (รองรับเครื่องหมายคำพูด/จุลภาค)
+async function ensureData(){
+  if(cache.length) return cache;
+  try{
+    const text = await fetchTextWithFallback(SRC);
     const parsed = Papa.parse(text, {header:true, dynamicTyping:true, skipEmptyLines:true});
-    if (parsed.errors && parsed.errors.length){
+    if(parsed.errors && parsed.errors.length){
       console.warn(parsed.errors[0]);
     }
-    const cols = parsed.meta.fields;
-    const need = ['date','league','team1','team2','prob1','probtie','prob2','xg1','xg2'];
-    for (const k of need){
-      if (!cols.includes(k)) throw new Error("missing column: "+k);
-    }
-    cache = parsed.data.map(r => ({
-      date: String(r.date || "").slice(0,10),
-      league: r.league || "",
-      team1: r.team1 || "",
-      team2: r.team2 || "",
-      prob1: +r.prob1 || 0,
-      probtie: +r.probtie || 0,
-      prob2: +r.prob2 || 0,
-      xg1: +r.xg1 || 0,
-      xg2: +r.xg2 || 0
+    const rows = parsed.data.map(r => ({
+      date: String(r.date||"").slice(0,10),
+      league: r.league||"",
+      team1: r.team1||"",
+      team2: r.team2||"",
+      prob1: +r.prob1||0,
+      probtie: +r.probtie||0,
+      prob2: +r.prob2||0,
+      xg1: +r.xg1||0,
+      xg2: +r.xg2||0
     }));
-    return cache;
-  } catch (e){
+    cache = rows;
+    return rows;
+  }catch(e){
     document.getElementById('out').innerHTML =
       "โหลดข้อมูลจาก FiveThirtyEight ไม่สำเร็จ : " + e.message +
-      "<br>ลองรีเฟรชหน้า หรือตรวจสัญญาณอินเทอร์เน็ตอีกครั้ง";
+      "<br>ลองรีเฟรชหน้าอีกครั้ง หรือสลับเครือข่าย (Wi-Fi/มือถือ)";
     throw e;
   }
 }
@@ -87,12 +112,11 @@ document.getElementById('go').onclick = async ()=>{
   const h = document.getElementById('home').value.trim().toLowerCase();
   const a = document.getElementById('away').value.trim().toLowerCase();
 
-  // หาคู่ โดยไม่สนตัวพิมพ์เล็ก-ใหญ่ และยอมรับการสลับเหย้าเยือน
   const m = rows.find(r=>r.team1.toLowerCase()===h && r.team2.toLowerCase()===a)
         || rows.find(r=>r.team1.toLowerCase()===a && r.team2.toLowerCase()===h);
 
   if(!m){
-    out.innerHTML = "ไม่พบคู่นี้ในไฟล์ล่าสุดของ 538<br>เคล็ดลับ: กดปุ่ม “วันนี้ทั้งหมด” เพื่อดูสะกดชื่อทีมให้ตรง";
+    out.innerHTML = "ไม่พบคู่นี้ในไฟล์ล่าสุดของ 538<br>Tip: กด “วันนี้ทั้งหมด (ลีกใหญ่)” เพื่อดูสะกดชื่อทีมให้ตรง";
     return;
   }
 
