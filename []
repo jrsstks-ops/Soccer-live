@@ -1,0 +1,57 @@
+name: Fetch matches (daily)
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # ทุกๆ 6 ชั่วโมง (ปรับได้)
+  workflow_dispatch:        # กดรันเองได้จากแท็บ Actions
+  push:
+    paths:
+      - ".github/workflows/fetch-matches.yml"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Fetch today fixtures from API
+        env:
+          API_KEY: ${{ secrets.FOOTBALL_TOKEN }}
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          mkdir -p data
+
+          # ===== เปลี่ยน URL / Header ให้ตรงกับผู้ให้บริการ API ของคุณ =====
+          # ตัวอย่างนี้ใช้ API-FOOTBALL (api-sports.io)
+          # ถ้าคุณใช้เจ้าอื่น เปลี่ยน URL และชื่อ Header ให้ถูกต้อง
+          curl -s --fail \
+            -H "x-apisports-key: $API_KEY" \
+            "https://v3.football.api-sports.io/fixtures?date=$DATE&timezone=UTC" \
+          | jq -c '.response
+              | map({
+                  date: (.fixture.date | sub("T.*$";"")),
+                  league: .league.name,
+                  home: .teams.home.name,
+                  away: .teams.away.name,
+                  # ใส่ค่าความน่าจะเป็น/อัตราต่อรองที่ API มีให้ ถ้าไม่มีจะเว้นว่าง
+                  ph: (.predictions.home_w || .odds.home_win // null),
+                  pd: (.predictions.draw_w || .odds.draw // null),
+                  pa: (.predictions.away_w || .odds.away_win // null)
+                })' \
+          > data/matches.json
+
+      - name: Commit & Push if changed
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+          else
+            git config user.email "actions@github.com"
+            git config user.name "github-actions"
+            git add data/matches.json
+            git commit -m "Update matches.json"
+            git push
+          fi
