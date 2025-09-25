@@ -1,0 +1,121 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Live Soccer (FiveThirtyEight)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai",Arial;max-width:900px;margin:28px auto;padding:0 12px;color:#111}
+  h1{font-size:1.4rem;margin:0 0 12px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  input,button{padding:10px;border-radius:10px;border:1px solid #ccc}
+  button{cursor:pointer;background:#f2f6ff;border-color:#9bb7ff}
+  table{border-collapse:collapse;width:100%;margin-top:12px}
+  th,td{border:1px solid #e5e7eb;padding:8px;text-align:center}
+  .note{color:#555;font-size:.9rem;margin-top:8px}
+</style>
+
+<h1>Live Soccer — FiveThirtyEight (Probabilities & xG)</h1>
+
+<div class="row">
+  <label>Home: <input id="home" value="Manchester City" /></label>
+  <label>Away: <input id="away" value="Arsenal" /></label>
+  <button id="go">Lookup</button>
+  <button id="today">วันนี้ทั้งหมด (ลีกใหญ่)</button>
+</div>
+
+<div id="out">พิมพ์ชื่อทีมแล้วกด Lookup</div>
+
+<script>
+const URL = "https://projects.fivethirtyeight.com/soccer-api/club/spi_matches_latest.csv";
+// ↑ ไฟล์ CSV สดจาก FiveThirtyEight มีคอลัมน์ prob1/probtie/prob2 และ xg1/xg2
+
+async function loadCSV(url){
+  const text = await fetch(url, {cache:"no-store"}).then(r=>r.text());
+  const [head,...lines] = text.trim().split(/\r?\n/);
+  const cols = head.split(",");
+  const I = k => cols.indexOf(k);
+  const req = ['date','league','team1','team2','prob1','probtie','prob2','xg1','xg2'];
+  for(const k of req){ if(I(k)===-1) throw new Error("missing column: "+k); }
+  return lines.map(l=>{
+    const t = l.split(",");
+    return {
+      date: t[I('date')],
+      league: t[I('league')],
+      team1: t[I('team1')],
+      team2: t[I('team2')],
+      prob1: +t[I('prob1')],
+      probtie: +t[I('probtie')],
+      prob2: +t[I('prob2')],
+      xg1: +t[I('xg1')],
+      xg2: +t[I('xg2')],
+    };
+  });
+}
+let cache=[];
+function pct(p){ return (p*100).toFixed(1)+"%"; }
+function fair(p){ return p>0 ? (1/p).toFixed(2) : "-"; }
+
+function rowHTML(m){
+  return `<tr>
+    <td>${m.date}</td><td>${m.league}</td>
+    <td>${m.team1}</td><td>${m.team2}</td>
+    <td>${pct(m.prob1)}</td><td>${pct(m.probtie)}</td><td>${pct(m.prob2)}</td>
+    <td>${fair(m.prob1)}</td><td>${fair(m.probtie)}</td><td>${fair(m.prob2)}</td>
+    <td>${m.xg1.toFixed(2)}–${m.xg2.toFixed(2)}</td>
+  </tr>`;
+}
+
+async function ensureData(){
+  if(!cache.length){
+    cache = await loadCSV(URL);
+  }
+  return cache;
+}
+
+document.getElementById('go').onclick = async ()=>{
+  const rows = await ensureData();
+  const h = document.getElementById('home').value.trim().toLowerCase();
+  const a = document.getElementById('away').value.trim().toLowerCase();
+  const m = rows.find(r=>r.team1.toLowerCase()===h && r.team2.toLowerCase()===a)
+        || rows.find(r=>r.team1.toLowerCase()===a && r.team2.toLowerCase()===h);
+  if(!m){
+    document.getElementById('out').innerHTML = "ไม่พบคู่นี้ในไฟล์ล่าสุด (ตรวจสะกดชื่อทีมภาษาอังกฤษให้ตรง 538)";
+    return;
+  }
+  document.getElementById('out').innerHTML = `
+    <h3>${m.team1} vs ${m.team2} — ${m.league} (${m.date})</h3>
+    <table>
+      <tr><th></th><th>Home</th><th>Draw</th><th>Away</th><th>xG(Home–Away)</th></tr>
+      <tr>
+        <td>Probability</td><td>${pct(m.prob1)}</td><td>${pct(m.probtie)}</td><td>${pct(m.prob2)}</td>
+        <td>${m.xg1.toFixed(2)}–${m.xg2.toFixed(2)}</td>
+      </tr>
+      <tr>
+        <td>Fair Odds</td><td>${fair(m.prob1)}</td><td>${fair(m.probtie)}</td><td>${fair(m.prob2)}</td>
+        <td>จากโมเดล 538</td>
+      </tr>
+    </table>
+    <div class="note">แหล่งข้อมูล: FiveThirtyEight Soccer SPI (อัปเดตตามฤดูกาล/แมตช์)</div>
+  `;
+};
+
+document.getElementById('today').onclick = async ()=>{
+  const rows = await ensureData();
+  // กรองเฉพาะนัด "วันนี้" ตามวันที่ในไฟล์ (ฟอร์แมต YYYY-MM-DD)
+  const today = new Date().toISOString().slice(0,10);
+  const lst = rows.filter(r=>r.date===today);
+  if(!lst.length){
+    document.getElementById('out').innerHTML = "วันนี้ไม่มีรายการในไฟล์ล่าสุดของ 538 หรือยังไม่อัปเดต";
+    return;
+  }
+  const html = `
+    <h3>รายการวันนี้ (${today})</h3>
+    <table>
+      <tr><th>Date</th><th>League</th><th>Home</th><th>Away</th>
+          <th>H%</th><th>D%</th><th>A%</th><th>H Fair</th><th>D Fair</th><th>A Fair</th><th>xG</th></tr>
+      ${lst.map(rowHTML).join("")}
+    </table>
+    <div class="note">Tip: ใช้ช่องค้นหาด้านบนพิมพ์ชื่อทีมแบบตรงตัว (อังกฤษ) เพื่อดูคู่เฉพาะ</div>
+  `;
+  document.getElementById('out').innerHTML = html;
+};
+</script>
