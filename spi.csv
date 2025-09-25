@@ -1,0 +1,11 @@
+date,league,team1,team2,prob1,probdraw,prob2,over25
+2025-09-25,Premier League,Manchester City,Arsenal,0.55,0.25,0.20,0.65
+2025-09-25,La Liga,Real Madrid,Barcelona,0.40,0.30,0.30,0.70
+2025-09-25,Bundesliga,Bayern Munich,Borussia Dortmund,0.50,0.25,0.25,0.68
+2025-09-25,Serie A,Juventus,AC Milan,0.45,0.30,0.25,0.55
+2025-09-25,Ligue 1,PSG,Marseille,0.60,0.20,0.20,0.72
+2025-09-26,Premier League,Liverpool,Chelsea,0.48,0.27,0.25,0.66
+2025-09-26,La Liga,Atletico Madrid,Sevilla,0.52,0.28,0.20,0.58
+2025-09-26,Bundesliga,RB Leipzig,Bayer Leverkusen,0.44,0.30,0.26,0.63
+2025-09-26,Serie A,Inter Milan,Napoli,0.46,0.29,0.25,0.61
+2025-09-26,Ligue 1,Lyon,Monaco,0.42,0.31,0.27,0.59
