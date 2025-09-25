@@ -1,172 +1,180 @@
 <!doctype html>
-<meta charset="utf-8" />
-<title>Live Soccer (FiveThirtyEight)</title>
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai",Arial;max-width:900px;margin:28px auto;padding:0 12px;color:#111}
-  h1{font-size:1.4rem;margin:0 0 12px}
-  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
-  input,button{padding:10px;border-radius:10px;border:1px solid #ccc}
-  button{cursor:pointer;background:#f2f6ff;border-color:#9bb7ff}
-  table{border-collapse:collapse;width:100%;margin-top:12px}
-  th,td{border:1px solid #e5e7eb;padding:8px;text-align:center}
-  .note{color:#555;font-size:.9rem;margin-top:8px}
-</style>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Live Soccer — FiveThirtyEight (Probabilities & xG)</title>
+  <style>
+    :root{--bg:#ffffff;--fg:#111;--muted:#555;--line:#e5e7eb;--accent:#f2f6ff}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai",Arial;
+         background:var(--bg);color:var(--fg);margin:16px;max-width:960px}
+    h1{font-size:1.4rem;margin:0 0 12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+    input,button{padding:10px;border-radius:8px;border:1px solid var(--line);font-size:1rem}
+    input{min-width:240px}
+    button{cursor:pointer;background:var(--accent)}
+    table{border-collapse:collapse;width:100%;margin-top:12px}
+    th,td{border:1px solid var(--line);padding:8px;text-align:left;font-size:.95rem}
+    th{background:#fafafa}
+    .note{color:var(--muted);font-size:.9rem;margin-top:8px}
+  </style>
+</head>
+<body>
+  <h1>Live Soccer — FiveThirtyEight (Probabilities & xG)</h1>
 
-<h1>Live Soccer — FiveThirtyEight (Probabilities & xG)</h1>
+  <div class="row">
+    <label>Home: <input id="home" placeholder="เช่น Manchester City" /></label>
+  </div>
+  <div class="row">
+    <label>Away: <input id="away" placeholder="เช่น Arsenal" /></label>
+    <button id="go">Lookup</button>
+  </div>
+  <div class="row">
+    <button id="today">วันนี้ทั้งหมด (ลีกใหญ่)</button>
+  </div>
 
-<div class="row">
-  <label>Home: <input id="home" value="Manchester City" /></label>
-  <label>Away: <input id="away" value="Arsenal" /></label>
-  <button id="go">Lookup</button>
-  <button id="today">วันนี้ทั้งหมด (ลีกใหญ่)</button>
-</div>
+  <div id="out" class="note">พิมพ์ชื่อทีมแล้วกด Lookup หรือกด “วันนี้ทั้งหมด”</div>
 
-<div id="out">พิมพ์ชื่อทีมแล้วกด Lookup</div>
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script>
-// 1) แหล่งข้อมูล
-const SRC = "https://projects.fivethirtyeight.com/soccer-api/club/spi_matches_latest.csv";
+  <!-- CSV parser -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script>
+  // =================== CONFIG ===================
+  const SRC = "https://projects.fivethirtyeight.com/soccer-api/club/spi_matches_latest.csv";
+  const PROXIES = [
+    u => "https://cors.isomorphic-git.org/" + u,
+    u => "https://r.jina.ai/http/" + u.replace(/^https?:\/\//,"")
+  ];
+  // =================== HELPERS ===================
+  const $ = id => document.getElementById(id);
+  const pct = p => (p*100).toFixed(1) + "%";
+  const fair = p => p>0 ? (1/p).toFixed(2) : "-";
+  const iso = d => new Date(d).toISOString().slice(0,10);
 
-// 2) Proxy สำรองกัน CORS
-const PROXIES = [
-  u => "https://cors.isomorphic-git.org/" + u,
-  u => "https://r.jina.ai/http/" + u.replace(/^https?:\/\//,"")
-];
+  let CACHE = [];
 
-// 3) Utils
-function pct(p){ return (p*100).toFixed(1)+"%"; }
-function fair(p){ return p>0 ? (1/p).toFixed(2) : "-"; }
-function toISODate(d){ return new Date(d).toISOString().slice(0,10); }
-
-let cache = [];
-
-async function fetchTextWithFallback(url){
-  // try direct
-  try {
-    const r = await fetch(url, {cache:"no-store"});
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    return await r.text();
-  } catch(e){ console.warn("Direct fetch failed:", e.message); }
-  // try proxies
-  for(const wrap of PROXIES){
-    const u = wrap(url);
+  async function fetchTextWithFallback(url){
+    // 1) ตรง
     try{
-      const r = await fetch(u, {cache:"no-store"});
+      const r = await fetch(url,{cache:"no-store"});
       if(!r.ok) throw new Error("HTTP "+r.status);
       return await r.text();
+    }catch(e){ console.warn("Direct fetch failed:", e.message); }
+    // 2) ผ่าน proxy
+    for(const wrap of PROXIES){
+      const u = wrap(url);
+      try{
+        const r = await fetch(u,{cache:"no-store"});
+        if(!r.ok) throw new Error("HTTP "+r.status);
+        return await r.text();
+      }catch(e){ console.warn("Proxy failed:", u, e.message); }
+    }
+    throw new Error("โหลดไฟล์ไม่ได้ทั้งตรงและผ่าน proxy");
+  }
+
+  async function ensureData(){
+    if(CACHE.length) return CACHE;
+    try{
+      const text = await fetchTextWithFallback(SRC);
+      const parsed = Papa.parse(text,{header:true,dynamicTyping:true,skipEmptyLines:true});
+      if(parsed.errors?.length) console.warn(parsed.errors[0]);
+      CACHE = parsed.data
+        .filter(r => r.date && r.team1 && r.team2)
+        .map(r => ({
+          date: String(r.date).slice(0,10),
+          league: r.league || "",
+          team1: r.team1 || "",
+          team2: r.team2 || "",
+          prob1: +r.prob1 || 0,
+          probtie: +r.probtie || 0,
+          prob2: +r.prob2 || 0,
+          xg1: +r.xg1 || 0,
+          xg2: +r.xg2 || 0
+        }));
+      return CACHE;
     }catch(e){
-      console.warn("Proxy failed:", u, e.message);
+      $("out").innerHTML =
+        "โหลดข้อมูลจาก FiveThirtyEight ไม่สำเร็จ : " + e.message +
+        "<br>ลองรีเฟรช หรือสลับเครือข่าย (Wi-Fi/มือถือ)";
+      throw e;
     }
   }
-  throw new Error("โหลดไฟล์ไม่ได้ทั้งตรงและผ่าน proxy");
-}
 
-async function ensureData(){
-  if(cache.length) return cache;
-  try{
-    const text = await fetchTextWithFallback(SRC);
-    const parsed = Papa.parse(text, {header:true, dynamicTyping:true, skipEmptyLines:true});
-    if(parsed.errors && parsed.errors.length) console.warn(parsed.errors[0]);
-
-    cache = parsed.data
-      .filter(r => r.date && r.team1 && r.team2)  // กันแถวว่าง
-      .map(r => ({
-        date: String(r.date).slice(0,10),
-        league: r.league || "",
-        team1: r.team1 || "",
-        team2: r.team2 || "",
-        prob1: +r.prob1 || 0,
-        probtie: +r.probtie || 0,
-        prob2: +r.prob2 || 0,
-        xg1: +r.xg1 || 0,
-        xg2: +r.xg2 || 0,
-      }));
-    return cache;
-  }catch(e){
-    document.getElementById('out').innerHTML =
-      "โหลดข้อมูลจาก FiveThirtyEight ไม่สำเร็จ : "+e.message+
-      "<br>ลองรีเฟรช หรือสลับเครือข่าย (Wi-Fi/มือถือ)";
-    throw e;
-  }
-}
-
-function rowHTML(m){
-  return `<tr>
-    <td>${m.date}</td><td>${m.league}</td>
-    <td>${m.team1}</td><td>${m.team2}</td>
-    <td>${pct(m.prob1)}</td><td>${pct(m.probtie)}</td><td>${pct(m.prob2)}</td>
-    <td>${fair(m.prob1)}</td><td>${fair(m.probtie)}</td><td>${fair(m.prob2)}</td>
-    <td>${m.xg1.toFixed(2)}–${m.xg2.toFixed(2)}</td>
-  </tr>`;
-}
-
-// 4) Lookup แบบเหย้า/เยือนได้ทั้งสองทิศ และไม่สนตัวพิมพ์
-document.getElementById('go').onclick = async ()=>{
-  const out = document.getElementById('out');
-  out.textContent = "กำลังค้นหา…";
-  const rows = await ensureData();
-  const h = document.getElementById('home').value.trim().toLowerCase();
-  const a = document.getElementById('away').value.trim().toLowerCase();
-
-  const m = rows.find(r=>r.team1.toLowerCase()===h && r.team2.toLowerCase()===a)
-        || rows.find(r=>r.team1.toLowerCase()===a && r.team2.toLowerCase()===h);
-
-  if(!m){
-    out.innerHTML = "ไม่พบคู่นี้ในไฟล์ล่าสุดของ 538<br>Tip: กด “วันนี้ทั้งหมด” เพื่อลอกชื่อทีมให้ตรง";
-    return;
+  function rowHTML(m){
+    return `<tr>
+      <td>${m.date}</td><td>${m.league}</td>
+      <td>${m.team1}</td><td>${m.team2}</td>
+      <td>${pct(m.prob1)}</td><td>${pct(m.probtie)}</td><td>${pct(m.prob2)}</td>
+      <td>${fair(m.prob1)}</td><td>${fair(m.probtie)}</td><td>${fair(m.prob2)}</td>
+      <td>${m.xg1.toFixed(2)}–${m.xg2.toFixed(2)}</td>
+    </tr>`;
   }
 
-  out.innerHTML = `
-    <h3>${m.team1} vs ${m.team2} — ${m.league} (${m.date})</h3>
-    <table>
-      <tr><th></th><th>Home</th><th>Draw</th><th>Away</th><th>xG(Home–Away)</th></tr>
-      <tr>
-        <td>Probability</td><td>${pct(m.prob1)}</td><td>${pct(m.probtie)}</td><td>${pct(m.prob2)}</td>
-        <td>${m.xg1.toFixed(2)}–${m.xg2.toFixed(2)}</td>
-      </tr>
-      <tr>
-        <td>Fair Odds</td><td>${fair(m.prob1)}</td><td>${fair(m.probtie)}</td><td>${fair(m.prob2)}</td>
-        <td>จากโมเดล 538</td>
-      </tr>
-    </table>`;
-};
+  // ============== EVENTS =================
+  $("go").onclick = async ()=>{
+    $("out").textContent = "กำลังค้นหา…";
+    const rows = await ensureData();
+    const h = $("home").value.trim().toLowerCase();
+    const a = $("away").value.trim().toLowerCase();
 
-// 5) ปุ่มวันนี้ — ถ้าวันนี้ว่าง ให้ fallback ไป "วันที่ล่าสุดในไฟล์"
-document.getElementById('today').onclick = async ()=>{
-  const out = document.getElementById('out');
-  out.textContent = "กำลังโหลดรายการ…";
-  const rows = await ensureData();
+    const m =
+      rows.find(r => r.team1.toLowerCase()===h && r.team2.toLowerCase()===a) ||
+      rows.find(r => r.team1.toLowerCase()===a && r.team2.toLowerCase()===h);
 
-  const today = toISODate(new Date());
-  let lst = rows.filter(r => r.date === today);
-
-  if(!lst.length){
-    // หา “วันที่ล่าสุดที่มีในไฟล์”
-    const lastDate = rows.map(r=>r.date).sort().pop();  // มากสุดตามตัวอักษร = ใหม่สุดในรูปแบบ YYYY-MM-DD
-    lst = rows.filter(r => r.date === lastDate);
-    if(!lst.length){
-      out.innerHTML = "ยังไม่พบแมตช์ในไฟล์";
+    if(!m){
+      $("out").innerHTML =
+        "ไม่พบคู่นี้ในไฟล์ล่าสุดของ 538<br>" +
+        'Tip: กดปุ่ม “วันนี้ทั้งหมด (ลีกใหญ่)” เพื่อดูสะกดชื่อทีมให้ตรง';
       return;
     }
-    out.innerHTML = `<h3>รายการล่าสุดในไฟล์ (${lastDate})</h3>
-      <div class="note">หมายเหตุ: วันนี้อาจไม่มีแมตช์ในฐานข้อมูล หรือโซนเวลาไม่ตรง</div>
+
+    $("out").innerHTML = `
+      <h3>${m.team1} vs ${m.team2} — ${m.league} (${m.date})</h3>
+      <table>
+        <tr><th></th><th>Home</th><th>Draw</th><th>Away</th><th>xG(Home–Away)</th></tr>
+        <tr>
+          <td>Probability</td><td>${pct(m.prob1)}</td><td>${pct(m.probtie)}</td><td>${pct(m.prob2)}</td>
+          <td>${m.xg1.toFixed(2)}–${m.xg2.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td>Fair Odds</td><td>${fair(m.prob1)}</td><td>${fair(m.probtie)}</td><td>${fair(m.prob2)}</td>
+          <td>จากโมเดล 538</td>
+        </tr>
+      </table>
+      <div class="note">ชื่อทีมต้องเป็นภาษาอังกฤษตามฐานข้อมูล 538</div>`;
+  };
+
+  $("today").onclick = async ()=>{
+    $("out").textContent = "กำลังโหลดรายการ…";
+    const rows = await ensureData();
+
+    const today = iso(new Date());
+    let lst = rows.filter(r => r.date === today);
+
+    if(!lst.length){
+      // ใช้ "วันที่ล่าสุดในไฟล์" แทน (กันปัญหาโซนเวลา/ไฟล์ยังไม่อัปเดต)
+      const lastDate = rows.map(r=>r.date).sort().pop();
+      lst = rows.filter(r => r.date === lastDate);
+      $("out").innerHTML = `
+        <h3>รายการล่าสุดในไฟล์ (${lastDate})</h3>
+        <div class="note">วันนี้อาจไม่มีแมตช์ในฐานข้อมูล หรือเวลาบนเครื่องไม่ตรงโซน</div>
+        <table>
+          <tr><th>Date</th><th>League</th><th>Home</th><th>Away</th>
+              <th>H%</th><th>D%</th><th>A%</th>
+              <th>H Fair</th><th>D Fair</th><th>A Fair</th><th>xG</th></tr>
+          ${lst.map(rowHTML).join("")}
+        </table>`;
+      return;
+    }
+
+    $("out").innerHTML = `
+      <h3>รายการวันนี้ (${today})</h3>
       <table>
         <tr><th>Date</th><th>League</th><th>Home</th><th>Away</th>
             <th>H%</th><th>D%</th><th>A%</th>
             <th>H Fair</th><th>D Fair</th><th>A Fair</th><th>xG</th></tr>
         ${lst.map(rowHTML).join("")}
       </table>`;
-    return;
-  }
-
-  out.innerHTML = `<h3>รายการวันนี้ (${today})</h3>
-    <table>
-      <tr><th>Date</th><th>League</th><th>Home</th><th>Away</th>
-          <th>H%</th><th>D%</th><th>A%</th>
-          <th>H Fair</th><th>D Fair</th><th>A Fair</th><th>xG</th></tr>
-      ${lst.map(rowHTML).join("")}
-    </table>`;
-};
-</script>
-
+  };
+  </script>
+</body>
+</html>
