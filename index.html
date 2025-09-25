@@ -1,90 +1,107 @@
-  <!DOCTYPE html>
+<!doctype html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <title>Soccer Predictions (API)</title>
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soccer Predictions (API Proxy)</title>
   <style>
-    body { font-family: system-ui, sans-serif; padding: 20px; }
-    h1 { font-size: 1.5rem; margin-bottom: 10px; }
-    .row { margin: 10px 0; }
-    input, select, button { padding: 8px; margin: 5px; }
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    h1 { font-size: 1.4rem; }
+    input, button { padding: 8px; margin: 5px; }
     table { border-collapse: collapse; margin-top: 15px; width: 100%; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-    th { background: #f2f2f2; }
+    th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
   </style>
 </head>
 <body>
-  <h1>Soccer Predictions (API)</h1>
+  <h1>Soccer Predictions (API ผ่าน Proxy)</h1>
+  
+  <label>Home: <input id="home" placeholder="เช่น Manchester City"></label>
+  <label>Away: <input id="away" placeholder="เช่น Arsenal"></label>
+  <button onclick="lookup()">Lookup</button>
+  <button onclick="loadToday()">วันนี้ทั้งหมด</button>
 
-  <div class="row">
-    <label>Home: <input id="home" placeholder="เช่น Manchester City"></label>
-    <label>Away: <input id="away" placeholder="เช่น Arsenal"></label>
-    <button id="lookup">Lookup</button>
-    <button id="today">วันนี้ทั้งหมด</button>
-  </div>
+  <div id="result"></div>
 
-  <div id="out">รอโหลดข้อมูล...</div>
+<script>
+const API_KEY = "568528145148427fb89dc5484884d1ea"; // << ใส่ token ของคุณไว้ตรงนี้
+// URL API ของคุณ (เปลี่ยนให้ตรงกับ provider ที่ให้มา)
+const BASE_URL = "https://api.football-data.org/v4/matches";
 
-  <script>
-    const API_KEY = "568528145148427fb89dc5484884d1ea"; // ใช้ key ของคุณ
-    const API_URL = "https://api.football-data.org/v4/matches";
+// Proxy wrapper
+function proxyUrl(url) {
+  return "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
+}
 
-    async function fetchMatches() {
-      const today = new Date().toISOString().split("T")[0];
-      const url = `${API_URL}?dateFrom=${today}&dateTo=${today}`;
-      const res = await fetch(url, {
-        headers: { "X-Auth-Token": API_KEY }
-      });
-      if (!res.ok) throw new Error("โหลด API ไม่สำเร็จ");
-      const data = await res.json();
-      return data.matches || [];
-    }
+// โหลดแมทช์วันนี้ทั้งหมด
+async function loadToday() {
+  document.getElementById("result").innerHTML = "กำลังโหลดข้อมูลวันนี้...";
+  try {
+    const resp = await fetch(proxyUrl(BASE_URL), {
+      headers: { "X-Auth-Token": API_KEY }
+    });
+    const data = await resp.json();
+    const contents = JSON.parse(data.contents); // allorigins คืนเป็น string → ต้อง parse อีกที
+    
+    showMatches(contents.matches);
+  } catch (e) {
+    document.getElementById("result").innerHTML = "โหลดข้อมูลไม่สำเร็จ: " + e;
+  }
+}
 
-    function renderTable(matches) {
-      if (!matches.length) return "<p>วันนี้ไม่มีแมตช์</p>";
-      let html = `
-        <table>
-          <tr><th>Date</th><th>League</th><th>Home</th><th>Away</th><th>Status</th></tr>
+// ค้นหาคู่แมทช์
+async function lookup() {
+  const home = document.getElementById("home").value.trim().toLowerCase();
+  const away = document.getElementById("away").value.trim().toLowerCase();
+
+  document.getElementById("result").innerHTML = "กำลังค้นหา...";
+
+  try {
+    const resp = await fetch(proxyUrl(BASE_URL), {
+      headers: { "X-Auth-Token": API_KEY }
+    });
+    const data = await resp.json();
+    const contents = JSON.parse(data.contents);
+
+    const match = contents.matches.find(m =>
+      m.homeTeam.name.toLowerCase().includes(home) &&
+      m.awayTeam.name.toLowerCase().includes(away)
+    );
+
+    if (match) {
+      document.getElementById("result").innerHTML = `
+        <h3>${match.competition.name}</h3>
+        <p>${match.homeTeam.name} vs ${match.awayTeam.name}</p>
+        <p>วันที่: ${match.utcDate}</p>
+        <p>สถานะ: ${match.status}</p>
       `;
-      matches.forEach(m => {
-        html += `<tr>
-          <td>${m.utcDate.split("T")[0]}</td>
-          <td>${m.competition.name}</td>
-          <td>${m.homeTeam.name}</td>
-          <td>${m.awayTeam.name}</td>
-          <td>${m.status}</td>
-        </tr>`;
-      });
-      html += "</table>";
-      return html;
+    } else {
+      document.getElementById("result").innerHTML = "ไม่พบแมทช์ที่ค้นหา";
     }
+  } catch (e) {
+    document.getElementById("result").innerHTML = "โหลดข้อมูลไม่สำเร็จ: " + e;
+  }
+}
 
-    document.getElementById("today").onclick = async () => {
-      document.getElementById("out").innerHTML = "กำลังโหลด...";
-      try {
-        const matches = await fetchMatches();
-        document.getElementById("out").innerHTML = renderTable(matches);
-      } catch (err) {
-        document.getElementById("out").innerHTML = "ผิดพลาด: " + err.message;
-      }
-    };
+// แสดงผลแมทช์ในตาราง
+function showMatches(matches) {
+  if (!matches || matches.length === 0) {
+    document.getElementById("result").innerHTML = "ไม่มีแมทช์วันนี้";
+    return;
+  }
 
-    document.getElementById("lookup").onclick = async () => {
-      const home = document.getElementById("home").value.trim().toLowerCase();
-      const away = document.getElementById("away").value.trim().toLowerCase();
-      document.getElementById("out").innerHTML = "กำลังค้นหา...";
-      try {
-        const matches = await fetchMatches();
-        const found = matches.filter(m =>
-          m.homeTeam.name.toLowerCase().includes(home) &&
-          m.awayTeam.name.toLowerCase().includes(away)
-        );
-        document.getElementById("out").innerHTML = renderTable(found);
-      } catch (err) {
-        document.getElementById("out").innerHTML = "ผิดพลาด: " + err.message;
-      }
-    };
-  </script>
+  let html = "<table><tr><th>Date</th><th>League</th><th>Home</th><th>Away</th><th>Status</th></tr>";
+  matches.forEach(m => {
+    html += `<tr>
+      <td>${m.utcDate}</td>
+      <td>${m.competition.name}</td>
+      <td>${m.homeTeam.name}</td>
+      <td>${m.awayTeam.name}</td>
+      <td>${m.status}</td>
+    </tr>`;
+  });
+  html += "</table>";
+  document.getElementById("result").innerHTML = html;
+}
+</script>
 </body>
 </html>
